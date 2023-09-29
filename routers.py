@@ -11,7 +11,7 @@ from services import compress_video, extract_thumbnail, is_valid_video
 from settings import COMPRESSED_DIR, THUMBNAIL_DIR, VIDEO_DIR
 
 
-router = APIRouter(prefix="/chrome_ext/screen_rec/api")
+router = APIRouter(prefix="/srce/api")
 
 
 @router.post("/upload/")
