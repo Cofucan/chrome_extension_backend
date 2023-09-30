@@ -1,13 +1,20 @@
 import os
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    HTTPException,
+    UploadFile,
+)
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
 from models import Video
-from services import compress_video, extract_thumbnail, is_valid_video
+from services import is_valid_video, process_video, create_directory
 from settings import COMPRESSED_DIR, THUMBNAIL_DIR, VIDEO_DIR
 
 
@@ -16,18 +23,13 @@ router = APIRouter(prefix="/srce/api")
 
 @router.post("/upload/")
 def upload_video(
-    username: str, file: UploadFile = File(...), db: Session = Depends(get_db)
+    background_tasks: BackgroundTasks,
+    username: str,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
 ):
     # Convert the username to lowercase
     username = username.lower()
-
-    # Check if the directories exist, if not create them
-    if not os.path.isdir(VIDEO_DIR):
-        os.makedirs(VIDEO_DIR, exist_ok=True)
-    if not os.path.isdir(COMPRESSED_DIR):
-        os.makedirs(COMPRESSED_DIR, exist_ok=True)
-    if not os.path.isdir(THUMBNAIL_DIR):
-        os.makedirs(THUMBNAIL_DIR, exist_ok=True)
 
     # Generate a unique filename using datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -37,20 +39,13 @@ def upload_video(
     file_location = os.path.join(VIDEO_DIR, unique_filename)
     file_location = os.path.abspath(file_location)
 
+    # Create the directories if they don't exist
+    create_directory(VIDEO_DIR, COMPRESSED_DIR, THUMBNAIL_DIR)
+
     # Save the uploaded file
     with open(file_location, "wb+") as file_object:
         for chunk in file.file:
             file_object.write(chunk)
-
-    # Compress and generate thumbnail, then get the absolute paths
-    compressed_location = os.path.join(
-        COMPRESSED_DIR, f"compressed_{unique_filename}.mp4"
-    )
-    compressed_location = os.path.abspath(compressed_location)
-    thumbnail_location = os.path.join(
-        THUMBNAIL_DIR, f"thumbnail_{unique_filename}.jpg"
-    )
-    thumbnail_location = os.path.abspath(thumbnail_location)
 
     # Delete the uploaded file if it is not a valid video
     if not is_valid_video(file_location):
@@ -60,11 +55,13 @@ def upload_video(
             detail="Invalid video file. Please upload a valid video file.",
         )
 
-    try:
-        compress_video(file_location, compressed_location)
-        extract_thumbnail(compressed_location, thumbnail_location)
-    except Exception as err:
-        raise HTTPException(status_code=500, detail=str(err)) from err
+    # Generate the compressed and thumbnail filenames
+    comp = f"compressed_{unique_filename}"
+    compressed_location = os.path.join(COMPRESSED_DIR, comp)
+    compressed_location = os.path.abspath(compressed_location)
+    thumb = f"thumbnail_{unique_filename}.jpg"
+    thumbnail_location = os.path.join(THUMBNAIL_DIR, thumb)
+    thumbnail_location = os.path.abspath(thumbnail_location)
 
     # Save the video data to the database
     video_data = Video(
@@ -80,7 +77,19 @@ def upload_video(
     db.refresh(video_data)
     db.close()
 
-    return {"msg": "Video uploaded successfully!", "video_data": video_data}
+    # Process the video in the background
+    background_tasks.add_task(
+        process_video,
+        video_data.id,
+        file_location,
+        compressed_location,
+        thumbnail_location,
+    )
+
+    return {
+        "msg": "Video uploaded successfully and is being processed!",
+        "video_data": video_data,
+    }
 
 
 @router.get("/videos/{username}")
