@@ -1,3 +1,4 @@
+import base64
 import os
 from datetime import datetime
 
@@ -13,8 +14,14 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from database import get_db
-from models import Video
-from services import is_valid_video, process_video, create_directory
+from models import Video, VideoBlob
+from services import (
+    is_valid_video,
+    process_video,
+    create_directory,
+    save_blob,
+    merge_blobs,
+)
 from settings import COMPRESSED_DIR, THUMBNAIL_DIR, VIDEO_DIR
 
 
@@ -55,20 +62,10 @@ def upload_video(
             detail="Invalid video file. Please upload a valid video file.",
         )
 
-    # Generate the compressed and thumbnail filenames
-    comp = f"compressed_{unique_filename}"
-    compressed_location = os.path.join(COMPRESSED_DIR, comp)
-    compressed_location = os.path.abspath(compressed_location)
-    thumb = f"thumbnail_{unique_filename}.jpg"
-    thumbnail_location = os.path.join(THUMBNAIL_DIR, thumb)
-    thumbnail_location = os.path.abspath(thumbnail_location)
-
     # Save the video data to the database
     video_data = Video(
         username=username,
         original_location=file_location,
-        compressed_location=compressed_location,
-        thumbnail_location=thumbnail_location,
         file_type=file.content_type,
     )
 
@@ -82,14 +79,63 @@ def upload_video(
         process_video,
         video_data.id,
         file_location,
-        compressed_location,
-        thumbnail_location,
+        unique_filename,
     )
 
     return {
         "msg": "Video uploaded successfully and is being processed!",
         "video_data": video_data,
     }
+
+
+@router.post("/upload_blob/")
+def upload_video_blob(
+    background_tasks: BackgroundTasks,
+    video_blob: VideoBlob,
+    db: Session = Depends(get_db),
+):
+    # Get the blob data
+    if isinstance(video_blob.blobObject, UploadFile):
+        blob_data = video_blob.blobObject.file.read()
+    else:
+        blob_data = base64.b64decode(video_blob.blobObject)
+
+    # Convert the username to lowercase
+    username = video_blob.username.lower()
+
+    # Save the blob
+    _ = save_blob(username, video_blob.filename, video_blob.blobId, blob_data)
+
+    # If it's the last blob, merge all blobs and process the video
+    if video_blob.is_last:
+        merged_video_path = merge_blobs(username, video_blob.filename)
+
+        # Save the video data to the database
+        video_data = Video(
+            username=username,
+            original_location=merged_video_path,
+            file_type="video/mp4",
+        )
+
+        db.add(video_data)
+        db.commit()
+        db.refresh(video_data)
+        db.close()
+
+        # Process the video in the background
+        # background_tasks.add_task(
+        #     process_video,
+        #     video_data.id,
+        #     merged_video_path,
+        #     video_blob.filename,
+        # )
+
+        return {
+            "msg": "Video blobs received successfully and video is being processed!",
+            "video_data": video_data,
+        }
+
+    return {"msg": "Video blob received successfully!"}
 
 
 @router.get("/videos/{username}")

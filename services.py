@@ -1,3 +1,4 @@
+import glob
 import os
 import subprocess
 
@@ -5,16 +6,24 @@ from fastapi import HTTPException
 
 from database import get_db
 from models import Video
+from settings import COMPRESSED_DIR, THUMBNAIL_DIR, VIDEO_DIR
 
 
 def process_video(
     video_id: int,
     file_location: str,
-    compressed_location: str,
-    thumbnail_location: str,
+    filename: str,
 ):
     db = next(get_db())
     video = db.query(Video).filter(Video.id == video_id).first()
+
+    # Generate compressed and thumbnail filenames
+    comp = f"compressed_{filename}.mp4"
+    compressed_location = os.path.join(COMPRESSED_DIR, comp)
+    compressed_location = os.path.abspath(compressed_location)
+    thumb = f"thumbnail_{filename}.jpg"
+    thumbnail_location = os.path.join(THUMBNAIL_DIR, thumb)
+    thumbnail_location = os.path.abspath(thumbnail_location)
 
     try:
         compress_video(file_location, compressed_location)
@@ -27,7 +36,9 @@ def process_video(
         video.status = "failed"
         raise HTTPException(status_code=500, detail=str(err)) from err
 
-    # Update the video status to complete
+    # Update the video status and save the compressed and thumbnail locations
+    video.compressed_location = compressed_location
+    video.thumbnail_location = thumbnail_location
     video.status = "complete"
 
     db.commit()
@@ -78,3 +89,62 @@ def create_directory(*args):
     for path in args:
         if not os.path.isdir(path):
             os.makedirs(path, exist_ok=True)
+
+
+def save_blob(username: str, filename: str, blob_id: int, blob: bytes) -> str:
+    """Saves a video blob/chunk.
+
+    Parameters:
+    - username: The user associated with the blob.
+    - filename: The base filename for the video.
+    - blob_id: The ID for this blob, indicating its sequence.
+    - blob: The video blob itself.
+
+    Returns:
+    - The path to the saved blob.
+    """
+    # Create the directory structure if it doesn't exist
+    user_dir = os.path.join(VIDEO_DIR, username)
+    temp_video_dir = os.path.join(user_dir, filename)
+    create_directory(user_dir, temp_video_dir)
+
+    # Save the blob
+    blob_filename = f"{blob_id}.mkv"
+    blob_path = os.path.join(temp_video_dir, blob_filename)
+    with open(blob_path, "wb") as f:
+        f.write(blob)
+
+    return blob_path
+
+
+def merge_blobs(username: str, filename: str) -> str:
+    """Merges video blobs/chunks to form the complete video.
+
+    Parameters:
+    - username: The user associated with the blobs.
+    - filename: The base filename for the video.
+
+    Returns:
+    - The path to the merged video.
+    """
+    user_dir = os.path.join(VIDEO_DIR, username)
+    user_dir = os.path.abspath(user_dir)
+    temp_video_dir = os.path.join(user_dir, filename)
+    temp_video_dir = os.path.abspath(temp_video_dir)
+
+    # List all blob files and sort them by their sequence ID
+    blob_files = sorted(
+        glob.glob(os.path.join(temp_video_dir, "*.mkv")),
+        key=lambda x: int(os.path.splitext(os.path.basename(x))[0]),
+    )
+    # Merge the blobs
+    merged_video_path = os.path.join(user_dir, f"{filename}.mkv")
+    with open(merged_video_path, "wb") as merged_file:
+        for blob_file in blob_files:
+            with open(blob_file, "rb") as f:
+                merged_file.write(f.read())
+
+    # Optionally, remove the temporary directory containing blobs
+    # shutil.rmtree(temp_video_dir)
+
+    return merged_video_path
