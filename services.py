@@ -14,6 +14,20 @@ def process_video(
     file_location: str,
     filename: str,
 ):
+    """
+    Process a video by compressing it and extracting a thumbnail.
+
+    Args:
+        video_id (int): The ID of the video.
+        file_location (str): The location of the video file.
+        filename (str): The name of the video file.
+
+    Raises:
+        HTTPException: If an error occurs during video compression or thumbnail extraction.
+
+    Returns:
+        None
+    """
     db = next(get_db())
     video = db.query(Video).filter(Video.id == video_id).first()
 
@@ -46,6 +60,17 @@ def process_video(
 
 
 def compress_video(input_path: str, output_path: str) -> None:
+    """
+    Compresses a video using ffmpeg.
+
+    Parameters:
+    - input_path: The path to the input video.
+    - output_path: The path to the output video.
+
+    Returns:
+    - None
+
+    """
     command = [
         "ffmpeg",
         "-i",
@@ -60,6 +85,17 @@ def compress_video(input_path: str, output_path: str) -> None:
 
 
 def extract_thumbnail(video_path: str, thumbnail_path: str) -> None:
+    """
+    Extracts a thumbnail from a video using ffmpeg.
+
+    Parameters:
+    - video_path: The path to the input video.
+    - thumbnail_path: The path to the output thumbnail.
+
+    Returns:
+    - None
+
+    """
     command = [
         "ffmpeg",
         "-i",
@@ -74,6 +110,13 @@ def extract_thumbnail(video_path: str, thumbnail_path: str) -> None:
 
 
 def is_valid_video(file_location: str) -> bool:
+    """
+    Check if a video file is valid by inspecting its metadata.
+    Args:
+        file_location (str): The location of the video file.
+    Returns:
+        bool: True if the video is valid, False otherwise.
+    """
     metadata_command = ["ffmpeg", "-i", file_location]
     result = subprocess.run(
         metadata_command,
@@ -86,6 +129,14 @@ def is_valid_video(file_location: str) -> bool:
 
 
 def create_directory(*args):
+    """
+    Create a directory or directories.
+    Args:
+        *args: Variable length argument list of directory paths.
+
+    Returns:
+        None
+    """
     for path in args:
         if not os.path.isdir(path):
             os.makedirs(path, exist_ok=True)

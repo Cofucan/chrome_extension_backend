@@ -35,6 +35,22 @@ def upload_video(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
 ):
+    """
+    Uploads a video file to the server and saves the video data to the database.
+
+    Parameters:
+    - background_tasks (BackgroundTasks): A background tasks instance used to enqueue the video processing task.
+    - username (str): The username of the user uploading the video.
+    - file (UploadFile, optional): The video file to be uploaded. Defaults to File(...).
+    - db (Session, optional): The database session. Defaults to Depends(get_db).
+
+    Returns:
+    - dict: A dictionary containing the success message and the video data.
+
+    Raises:
+    - HTTPException: If the uploaded file is not a valid video.
+
+    """
     # Convert the username to lowercase
     username = username.lower()
 
@@ -94,6 +110,20 @@ def upload_video_blob(
     video_blob: VideoBlob,
     db: Session = Depends(get_db),
 ):
+    """
+    Uploads a video blob to the server.
+
+    Args:
+        background_tasks (BackgroundTasks): The background tasks object.
+        video_blob (VideoBlob): The video blob data.
+        db (Session, optional): The database session. Defaults to Depends(get_db).
+
+    Returns:
+        dict: A dictionary containing the success message and video data if applicable.
+
+    Raises:
+        None
+    """
     # Get the blob data
     if isinstance(video_blob.blobObject, UploadFile):
         blob_data = video_blob.blobObject.file.read()
@@ -140,6 +170,14 @@ def upload_video_blob(
 
 @router.get("/videos/{username}")
 def get_videos(username: str, db: Session = Depends(get_db)):
+    """
+    Returns a list of videos associated with the given username.
+    Parameters:
+        username (str): The username for which to retrieve the videos.
+        db (Session): The database session.
+    Returns:
+        List[Video]: A list of Video objects associated with the given username.
+    """
     # Convert the username to lowercase for querying
     username = username.lower()
 
@@ -150,6 +188,16 @@ def get_videos(username: str, db: Session = Depends(get_db)):
 
 @router.get("/video/stream/{video_id}")
 def stream_video(video_id: int, db: Session = Depends(get_db)):
+    """
+    Stream a video by its video ID.
+    Parameters:
+    - video_id (int): The ID of the video to be streamed.
+    - db (Session, optional): The database session. Defaults to the result of the get_db function.
+    Returns:
+    - FileResponse: The file response containing the video stream.
+    Raises:
+    - HTTPException: If the video is not found.
+    """
     video = db.query(Video).filter(Video.id == video_id).first()
     db.close()
 
@@ -160,6 +208,19 @@ def stream_video(video_id: int, db: Session = Depends(get_db)):
 
 @router.delete("/video/{video_id}")
 def delete_video(video_id: int, db: Session = Depends(get_db)):
+    """
+    Deletes a video from the database and removes its associated files from the file system.
+
+    Parameters:
+        - video_id (int): The ID of the video to be deleted.
+        - db (Session, optional): The database session. Defaults to the result of the `get_db` function.
+
+    Returns:
+        - dict: A dictionary with a single key "msg" and the value "Video deleted successfully!"
+
+    Raises:
+        - HTTPException: If the video with the specified ID is not found in the database.
+    """
     if video := db.query(Video).filter(Video.id == video_id).first():
         os.remove(video.original_location)
         if os.path.exists(video.thumbnail_location):
